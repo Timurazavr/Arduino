@@ -1,44 +1,60 @@
 #include "I2Cdev.h"
 #include "MPU6050_6Axis_MotionApps20.h"
+#include "Wire.h"
+#include <Mouse.h>
+
 MPU6050 mpu;
 
-uint8_t fifoBuffer[45];         // буфер
+uint16_t packetSize;
+uint16_t fifoCount;
+uint8_t fifoBuffer[64];
+
+Quaternion q;     
+VectorFloat gravity;  
+float ypr[3];    
+
+float old_mx = -200;
+float old_my = -200;
+float dx, dy, mx, my;
 
 void setup() {
-  Serial.begin(115200);
   Wire.begin();
-  //Wire.setClock(1000000UL);   // разгоняем шину на максимум
-
-  // инициализация DMP
+  Wire.setClock(400000);
   mpu.initialize();
   mpu.dmpInitialize();
   mpu.setDMPEnabled(true);
+  packetSize = mpu.dmpGetFIFOPacketSize();
 }
 
 void loop() {
-  static uint32_t tmr;
-  if (millis() - tmr >= 11) {  // таймер на 11 мс (на всякий случай)
-    if (mpu.dmpGetCurrentFIFOPacket(fifoBuffer)) {
-      // переменные для расчёта (ypr можно вынести в глобал)
-      Quaternion q;
-      VectorFloat gravity;
-      float ypr[3];
-
-      // расчёты
-      mpu.dmpGetQuaternion(&q, fifoBuffer);
-      mpu.dmpGetGravity(&gravity, &q);
-      mpu.dmpGetYawPitchRoll(ypr, &q, &gravity);
-
-      // выводим результат в радианах (-3.14, 3.14)
-      Serial.println(degrees(ypr[0])); // вокруг оси Z
-      // Serial.print(',');
-      // Serial.print(ypr[1]); // вокруг оси Y
-      // Serial.print(',');
-      // Serial.print(ypr[2]); // вокруг оси X
-      // Serial.println();
-      // для градусов можно использовать degrees()
-
-      tmr = millis();  // сброс таймера
+  while (fifoCount < packetSize) {
+    fifoCount = mpu.getFIFOCount();
+  }
+  if (fifoCount >= 1024) {
+    mpu.resetFIFO();
+    fifoCount = mpu.getFIFOCount();
+  } else {
+    while (fifoCount < packetSize) fifoCount = mpu.getFIFOCount();
+    mpu.getFIFOBytes(fifoBuffer, packetSize);
+    fifoCount -= packetSize;
+    mpu.dmpGetQuaternion(&q, fifoBuffer);
+    mpu.dmpGetGravity(&gravity, &q);
+    mpu.dmpGetYawPitchRoll(ypr, &q, &gravity);
+    mx = ypr[0] * 180 / M_PI;
+    my = ypr[1] * 180 / M_PI;
+    if (old_mx > -200)
+    {
+      if ((old_mx < -100) && (mx > 100)) {
+        dx = (-180 - old_mx) + (mx - 180);
+      } else if ((old_mx > 100) && (mx < -100)) {
+        dx = (180 - old_mx) + (180 + mx);
+      } else {
+        dx = mx - old_mx;
+      }
+      dy = my - old_my;
+      Mouse.move(2000 / 60 * dx, -1000 / 30 * dy);
     }
+    old_mx = mx;
+    old_my = my;
   }
 }
